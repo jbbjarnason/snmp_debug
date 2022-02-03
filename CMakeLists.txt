@@ -33,6 +33,10 @@ ExternalProject_Add(netsnmp
     UPDATE_COMMAND ""
 )
 
+#add_compile_options("-fstack-check  -fstack-protector-all")
+add_compile_options(-Wall -Wextra -Wpedantic -fsanitize=address -g)
+
+
 add_library(libnetsnmp STATIC IMPORTED)
 set_target_properties(libnetsnmp PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -43,6 +47,8 @@ add_executable(snmp_debug main.cpp)
 
 target_link_libraries(snmp_debug
     PRIVATE
+        asan
         libnetsnmp
         OpenSSL::Crypto
+        pthread
 )

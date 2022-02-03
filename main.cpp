@@ -1,25 +1,24 @@
+#include <string_view>
 #include <string>
 #include <exception>
+#include <thread>
 
 #include <net-snmp/net-snmp-config.h>
 #include <net-snmp/net-snmp-includes.h>
 
-static const std::string peername{ "172.18.0.2:161" };
-static const std::string username{ "jonbjarni" };
-static const std::string authKey{ "jonbjarni" };
-static const std::string privKey{ "jonbjarni" };
+static constexpr std::string_view username{ "jonbjarni" };
+static constexpr std::string_view authKey{ "jonbjarni" };
+static constexpr std::string_view privKey{ "jonbjarni" };
 static const oid         objid_mib[] = { 1, 3, 6, 1, 2, 1 };
 
-int main() {
-    init_snmp("snmpapp");
-    netsnmp_ds_set_boolean(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_QUICK_PRINT, TRUE);
 
+static void walk(const std::string& peername) {
     struct snmp_session session{};
     snmp_sess_init(&session);
 
     session.version = 3;
     session.peername = (char*)peername.c_str();
-    session.securityName = (char*)username.c_str();
+    session.securityName = (char*)username.data();
     session.securityNameLen = username.size();
     session.securityLevel = SNMP_SEC_LEVEL_AUTHPRIV;
     session.securityAuthProto = usmHMACSHA1AuthProtocol;
@@ -27,9 +26,9 @@ int main() {
     session.securityAuthKeyLen = USM_AUTH_KU_LEN;
 
     const auto authResult{
-        generate_Ku(session.securityAuthProto, session.securityAuthProtoLen,
-                    (u_char *)authKey.c_str(), authKey.size(),
-                    session.securityAuthKey, &(session.securityAuthKeyLen))};
+            generate_Ku(session.securityAuthProto, session.securityAuthProtoLen,
+                        (u_char *)authKey.data(), authKey.size(),
+                        session.securityAuthKey, &(session.securityAuthKeyLen))};
 
     if (authResult != SNMPERR_SUCCESS) {
         printf("Something wrong with generating hashed authentication key\n");
@@ -42,9 +41,9 @@ int main() {
     session.securityPrivKeyLen = USM_PRIV_KU_LEN;
 
     const auto privResult{
-        generate_Ku(session.securityAuthProto, session.securityAuthProtoLen,
-                    (u_char *)privKey.c_str(), privKey.size(),
-                    session.securityPrivKey, &(session.securityPrivKeyLen))};
+            generate_Ku(session.securityAuthProto, session.securityAuthProtoLen,
+                        (u_char *)privKey.data(), privKey.size(),
+                        session.securityPrivKey, &(session.securityPrivKeyLen))};
 
     if (privResult != SNMPERR_SUCCESS) {
         printf("Something wrong with generating hashed private key\n");
@@ -61,7 +60,6 @@ int main() {
     oid name[MAX_OID_LEN];
     memmove(name, objid_mib, sizeof(objid_mib));
     size_t name_len = sizeof(objid_mib) / sizeof(oid);
-    //read_objid(scanOid.c_str(), name, &name_len);
 
     // create an end oid so we know when to stop
     oid end_oid[MAX_OID_LEN];
@@ -121,7 +119,7 @@ int main() {
                     goto close;
                 }
 
-                print_variable(vars->name, vars->name_length, vars);
+                //print_variable(vars->name, vars->name_length, vars);
                 // Todo: do something with var
 
                 if (vars->next_variable == nullptr) {
@@ -135,7 +133,9 @@ int main() {
     }
 
 close:
-    printf("closing\n");
+
+    size_t id{ std::hash<std::thread::id>{}(std::this_thread::get_id()) };
+    printf("closing  %zu\n", id);
 
     snmp_sess_close(open_session);
 
@@ -143,6 +143,42 @@ close:
         free(session.securityEngineID);
     if (session.contextEngineID)
         free(session.contextEngineID);
+}
+
+struct snmpLog {
+
+    static int logCb(int /*majorID*/, int /*minorID*/, void* serverarg, void* /* clientarg */)
+    {
+        const auto msg{ static_cast<struct snmp_log_message*>(serverarg) };
+        printf("[%zu] %s \n", std::hash<std::thread::id>{}(std::this_thread::get_id()),  msg->msg);
+        return 42; // return value is not used within snmp call_callbacks function
+    }
+
+    snmpLog()
+    {
+        snmp_register_callback(SNMP_CALLBACK_LIBRARY, SNMP_CALLBACK_LOGGING, &logCb, nullptr);
+        snmp_enable_calllog(); // propagate all logs to the above callback
+        //snmp_enable_stderrlog();
+        snmp_disable_stderrlog(); // disable any log from appearing in std out
+        snmp_set_do_debugging(1); // enable all logging levels
+    }
+};
+
+static snmpLog globalLogging;
+
+
+
+int main() {
+    init_snmp("snmpapp");
+    netsnmp_ds_set_boolean(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_QUICK_PRINT, TRUE);
+
+    std::thread th1(walk, "172.18.0.2:161");
+    std::thread th2(walk, "172.18.0.3:161");
+
+    th1.join();
+    th2.join();
+
+//    walk("172.18.0.2:161");
 
     return 0;
 }
