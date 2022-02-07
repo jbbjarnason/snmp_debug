@@ -12,9 +12,7 @@ static constexpr std::string_view privKey{ "jonbjarni" };
 static const oid         objid_mib[] = { 1, 3, 6, 1, 2, 1 };
 
 
-static void walk(const std::string& peername) {
-    struct snmp_session session{};
-    snmp_sess_init(&session);
+static void walk(snmp_session& session,const std::string& peername) {
 
     session.version = 3;
     session.peername = (char*)peername.c_str();
@@ -172,8 +170,14 @@ int main() {
     init_snmp("snmpapp");
     netsnmp_ds_set_boolean(NETSNMP_DS_LIBRARY_ID, NETSNMP_DS_LIB_QUICK_PRINT, TRUE);
 
-    std::thread th1(walk, "172.18.0.2:161");
-    std::thread th2(walk, "172.18.0.3:161");
+    struct snmp_session session_th1{};
+    snmp_sess_init(&session_th1);
+
+    struct snmp_session session_th2{};
+    snmp_sess_init(&session_th2);
+
+    std::thread th1(walk, std::ref(session_th1), "172.18.0.2:161");
+    std::thread th2(walk, std::ref(session_th2), "172.18.0.3:161");
 
     th1.join();
     th2.join();
